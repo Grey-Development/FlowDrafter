@@ -65,6 +65,7 @@ const ProjectForm: React.FC<Props> = ({ onSubmit, disabled }) => {
           <span className="block text-sm font-semibold text-gray-700 mb-2">Drone Image</span>
           <label
             htmlFor="drone-image-upload"
+            onClick={() => fileInputRef.current?.click()}
             className={`block border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
               imagePreview ? 'border-emerald-300 bg-emerald-50' : 'border-gray-300 hover:border-emerald-400 hover:bg-gray-50'
             }`}
@@ -88,7 +89,8 @@ const ProjectForm: React.FC<Props> = ({ onSubmit, disabled }) => {
               id="drone-image-upload"
               ref={fileInputRef}
               type="file"
-              className="hidden"
+              className="absolute w-0 h-0 opacity-0 overflow-hidden"
+              style={{ position: 'absolute', width: 0, height: 0, opacity: 0, overflow: 'hidden' }}
               accept="image/jpeg,image/png,image/webp"
               onChange={handleImageChange}
             />
