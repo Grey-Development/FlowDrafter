@@ -1,0 +1,7 @@
+{
+  "name": "FlowDrafter: Irrigation Design Tool",
+  "description": "AI-powered irrigation design tool that analyzes drone imagery and generates professional ARCH D plan sets with engineering-grade head placement, zone assignment, and pipe routing.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
