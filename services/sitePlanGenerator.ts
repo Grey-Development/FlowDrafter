@@ -2,16 +2,10 @@
  * FlowDrafter Site Plan Generator
  *
  * Step 1 of the 3-step visual pipeline:
- * Converts drone aerial image + site analysis into a clean 2D architectural SVG site plan
- *
- * Uses Gemini AI to generate professional civil engineering style drawings
+ * Converts site analysis into a clean 2D architectural SVG site plan
  */
 
-import { GoogleGenAI, Type } from '@google/genai';
-import { SiteAnalysis, ProjectInput } from '../types';
-import { EXPERT_SYSTEM_INSTRUCTION } from './knowledgePrompts';
-
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+import { SiteAnalysis } from '../types';
 
 // ============================================================================
 // ARCHITECTURAL COLOR PALETTE
@@ -105,120 +99,6 @@ export const SITE_PLAN_COLORS = {
 };
 
 // ============================================================================
-// SVG GENERATION SCHEMA
-// ============================================================================
-
-const SITE_PLAN_SVG_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    viewBox: {
-      type: Type.STRING,
-      description: 'SVG viewBox attribute, format: "0 0 width height" in feet',
-    },
-    propertyBoundary: {
-      type: Type.OBJECT,
-      properties: {
-        points: {
-          type: Type.STRING,
-          description: 'SVG polygon points for property boundary, space-separated x,y pairs',
-        },
-      },
-      required: ['points'],
-    },
-    buildings: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          id: { type: Type.STRING },
-          points: { type: Type.STRING, description: 'SVG polygon points' },
-          label: { type: Type.STRING },
-        },
-        required: ['id', 'points'],
-      },
-    },
-    hardscape: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          id: { type: Type.STRING },
-          type: { type: Type.STRING, enum: ['driveway', 'walkway', 'patio', 'parking', 'other'] },
-          points: { type: Type.STRING },
-        },
-        required: ['id', 'type', 'points'],
-      },
-    },
-    turfAreas: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          id: { type: Type.STRING },
-          points: { type: Type.STRING },
-          label: { type: Type.STRING },
-        },
-        required: ['id', 'points'],
-      },
-    },
-    bedAreas: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          id: { type: Type.STRING },
-          type: { type: Type.STRING, enum: ['bed', 'planter', 'tree-ring'] },
-          points: { type: Type.STRING },
-        },
-        required: ['id', 'type', 'points'],
-      },
-    },
-    narrowStrips: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          id: { type: Type.STRING },
-          points: { type: Type.STRING },
-        },
-        required: ['id', 'points'],
-      },
-    },
-    trees: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          id: { type: Type.STRING },
-          cx: { type: Type.NUMBER, description: 'Center X in feet' },
-          cy: { type: Type.NUMBER, description: 'Center Y in feet' },
-          radius: { type: Type.NUMBER, description: 'Canopy radius in feet' },
-        },
-        required: ['id', 'cx', 'cy', 'radius'],
-      },
-    },
-    waterSource: {
-      type: Type.OBJECT,
-      nullable: true,
-      properties: {
-        x: { type: Type.NUMBER },
-        y: { type: Type.NUMBER },
-      },
-    },
-    northArrow: {
-      type: Type.OBJECT,
-      properties: {
-        x: { type: Type.NUMBER },
-        y: { type: Type.NUMBER },
-        rotation: { type: Type.NUMBER, description: 'Rotation in degrees, 0 = up' },
-      },
-      required: ['x', 'y', 'rotation'],
-    },
-  },
-  required: ['viewBox', 'buildings', 'hardscape', 'turfAreas', 'bedAreas', 'trees'],
-};
-
-// ============================================================================
 // SITE PLAN GENERATION
 // ============================================================================
 
@@ -236,76 +116,8 @@ export interface SitePlanSvgData {
 }
 
 /**
- * Generate a clean 2D architectural site plan SVG from drone image and analysis
- */
-export async function generateSitePlanSvg(
-  base64Image: string,
-  mimeType: string,
-  siteAnalysis: SiteAnalysis,
-  projectInput: Partial<ProjectInput>
-): Promise<{ svgContent: string; svgData: SitePlanSvgData }> {
-  const prompt = `You are generating a clean 2D architectural site plan SVG from this drone aerial photograph.
-
-EXISTING SITE ANALYSIS (use these dimensions and positions):
-${JSON.stringify(siteAnalysis, null, 2)}
-
-PROJECT CONTEXT:
-- Application: ${projectInput.applicationType || 'commercial'}
-- Property dimensions: ${siteAnalysis.propertyWidthFt} ft × ${siteAnalysis.propertyLengthFt} ft
-
-REQUIREMENTS:
-1. Generate SVG polygon/circle data for a clean architectural site plan
-2. Use the coordinate system from the site analysis (origin at top-left, Y increases downward)
-3. All measurements in feet
-4. Trace clean, simplified outlines - no complex curves, just straight polygon edges
-5. Buildings should be solid rectangles/polygons
-6. Turf areas should be closed polygons
-7. Trees should be circles with their canopy radius
-
-OUTPUT FORMAT:
-- viewBox should be "0 0 {propertyWidthFt} {propertyLengthFt}"
-- All polygon points as SVG-compatible strings: "x1,y1 x2,y2 x3,y3..."
-- Coordinates in feet from origin
-
-Generate the architectural site plan elements based on what you see in the image and the provided analysis.`;
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: {
-      parts: [
-        { inlineData: { data: base64Image, mimeType } },
-        { text: prompt },
-      ],
-    },
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: SITE_PLAN_SVG_SCHEMA,
-      systemInstruction: `${EXPERT_SYSTEM_INSTRUCTION}
-
-You are also an expert in civil engineering site plan drafting. Generate clean, professional SVG data that would be suitable for a landscape architecture plan set. Use simple polygons with straight edges. Avoid unnecessary complexity.`,
-    },
-  });
-
-  const svgData = JSON.parse(response.text || '{}') as SitePlanSvgData;
-
-  // Ensure defaults
-  if (!svgData.buildings) svgData.buildings = [];
-  if (!svgData.hardscape) svgData.hardscape = [];
-  if (!svgData.turfAreas) svgData.turfAreas = [];
-  if (!svgData.bedAreas) svgData.bedAreas = [];
-  if (!svgData.narrowStrips) svgData.narrowStrips = [];
-  if (!svgData.trees) svgData.trees = [];
-  if (!svgData.viewBox) svgData.viewBox = `0 0 ${siteAnalysis.propertyWidthFt} ${siteAnalysis.propertyLengthFt}`;
-
-  // Generate the actual SVG content
-  const svgContent = renderSitePlanSvg(svgData, siteAnalysis);
-
-  return { svgContent, svgData };
-}
-
-/**
  * Generate site plan SVG from existing site analysis (no AI call)
- * Useful when site analysis already has detailed zone boundaries
+ * Creates a clean architectural-style site plan from analyzed zone boundaries
  */
 export function generateSitePlanFromAnalysis(siteAnalysis: SiteAnalysis): string {
   const svgData: SitePlanSvgData = {
