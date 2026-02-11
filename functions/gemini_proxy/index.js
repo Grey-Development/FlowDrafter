@@ -1,9 +1,6 @@
-/**
- * Zoho Catalyst Serverless Function - Gemini API Proxy
- * Securely proxies requests to Google Gemini API
- */
+'use strict';
 
-import { GoogleGenAI } from '@google/genai';
+const { GoogleGenAI } = require('@google/genai');
 
 // Initialize Gemini AI (API key from Catalyst environment variable)
 let ai = null;
@@ -14,7 +11,7 @@ function getAI() {
     const apiKey = process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
-      throw new Error('GEMINI_API_KEY not configured. Please set it in Catalyst Console > Functions > gemini_proxy > Configuration > Environment Variables');
+      throw new Error('GEMINI_API_KEY not configured');
     }
 
     ai = new GoogleGenAI({ apiKey });
@@ -184,40 +181,39 @@ Return JSON: { valid: boolean, issues: string[], recommendations: string[] }`;
 }
 
 // Main handler for Catalyst Advanced I/O function
-export default async function handler(request, response) {
+module.exports = async (req, res) => {
   // Set CORS headers
-  response.setHeader('Access-Control-Allow-Origin', '*');
-  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
 
   // Handle preflight
-  if (request.method === 'OPTIONS') {
-    return response.status(200).send();
+  if (req.method === 'OPTIONS') {
+    res.status(200).send('');
+    return;
   }
 
-  // Get the path - Catalyst provides the path after the function name
-  const url = request.url || '';
+  // Get the path from the URL
+  const url = req.url || '/';
   const path = url.split('?')[0];
 
-  console.log(`[gemini_proxy] ${request.method} ${path}`);
+  console.log(`[gemini_proxy] ${req.method} ${path}`);
 
   try {
     // Health check
-    if (path === '/health' || path === '') {
+    if (path === '/health' || path === '/' || path === '') {
       const hasApiKey = !!process.env.GEMINI_API_KEY;
-      return response.status(200).json({
+      res.status(200).send({
         status: 'ok',
         timestamp: new Date().toISOString(),
         apiKeyConfigured: hasApiKey,
         message: hasApiKey ? 'Ready' : 'WARNING: GEMINI_API_KEY not configured',
       });
+      return;
     }
 
-    // Parse body for POST requests
-    let body = {};
-    if (request.method === 'POST') {
-      body = request.body || {};
-    }
+    // Get body for POST requests
+    const body = req.body || {};
 
     let result;
 
@@ -235,21 +231,22 @@ export default async function handler(request, response) {
         result = { status: 404, body: { error: `Endpoint not found: ${path}` } };
     }
 
-    return response.status(result.status).json(result.body);
+    res.status(result.status).send(result.body);
   } catch (error) {
     console.error('[gemini_proxy] Error:', error.message);
 
     // Check if it's an API key error
     if (error.message.includes('GEMINI_API_KEY')) {
-      return response.status(500).json({
+      res.status(500).send({
         error: 'API key not configured',
         message: 'Please set GEMINI_API_KEY in Catalyst Console > Functions > gemini_proxy > Configuration',
       });
+      return;
     }
 
-    return response.status(500).json({
+    res.status(500).send({
       error: 'Request failed',
       message: error.message,
     });
   }
-}
+};
