@@ -76,6 +76,7 @@ export interface SiteAnalysis {
     position: { x: number; y: number };
     widthFt: number;
     lengthFt: number;
+    boundaryPoints?: Array<{ x: number; y: number }>;
   }>;
   slopeIndicators: Array<{
     location: { x: number; y: number };
