@@ -21,6 +21,11 @@ export interface ProjectInput {
   droneImageBase64: string;
   droneImageMimeType: string;
   droneImagePreviewUrl: string;
+  // Scale reference for accurate measurements
+  propertyWidthFt?: number;
+  propertyLengthFt?: number;
+  scaleReferenceFt?: number; // Known distance reference (e.g., "driveway is 20ft wide")
+  scaleReferenceDescription?: string; // What the reference is (e.g., "driveway width")
 }
 
 export interface IrrigableZone {
