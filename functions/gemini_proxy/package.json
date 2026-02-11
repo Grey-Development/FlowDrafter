@@ -5,7 +5,6 @@
   "main": "index.js",
   "type": "module",
   "dependencies": {
-    "@google/genai": "^1.40.0",
-    "zcatalyst-sdk-node": "^0.0.5"
+    "@google/genai": "^1.40.0"
   }
 }

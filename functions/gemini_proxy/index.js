@@ -4,26 +4,17 @@
  */
 
 import { GoogleGenAI, Type } from '@google/genai';
-import catalyst from 'zcatalyst-sdk-node';
 
-// Initialize Gemini AI (API key from Catalyst Secrets)
+// Initialize Gemini AI (API key from environment variable)
 let ai = null;
 
-async function getAI(catalystApp) {
+async function getAI() {
   if (!ai) {
-    // Get API key from Catalyst Secrets
-    const segments = catalystApp.cache().segment();
-    let apiKey;
-    try {
-      const cached = await segments.get('gemini_api_key');
-      apiKey = cached?.cache_value;
-    } catch (e) {
-      // Fallback to environment variable
-      apiKey = process.env.GEMINI_API_KEY;
-    }
+    // Get API key from environment variable (set in Catalyst console)
+    const apiKey = process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
-      throw new Error('Gemini API key not configured');
+      throw new Error('GEMINI_API_KEY environment variable not configured');
     }
 
     ai = new GoogleGenAI({ apiKey });
@@ -87,7 +78,7 @@ const SITE_ANALYSIS_SCHEMA = {
 const EXPERT_SYSTEM_INSTRUCTION = `You are a Certified Irrigation Designer (CID) with 25 years of experience in commercial irrigation design...`;
 
 // Route handlers
-async function handleAnalyzeSite(req, res, catalystApp) {
+async function handleAnalyzeSite(req, res) {
   try {
     const { base64Image, mimeType, projectInput } = req.body;
 
@@ -95,7 +86,7 @@ async function handleAnalyzeSite(req, res, catalystApp) {
       return res.status(400).json({ error: 'Missing image data' });
     }
 
-    const genAI = await getAI(catalystApp);
+    const genAI = await getAI();
 
     const prompt = `Analyze this drone/aerial image of a property for irrigation design.
 Identify all irrigable zones (turf, beds, planters), hardscape areas, structures, and obstacles.
@@ -137,7 +128,7 @@ Turf type: ${projectInput?.turfType || 'bermudagrass'}`;
   }
 }
 
-async function handleDesignRecommendations(req, res, catalystApp) {
+async function handleDesignRecommendations(req, res) {
   try {
     const { siteAnalysis, projectInput } = req.body;
 
@@ -145,7 +136,7 @@ async function handleDesignRecommendations(req, res, catalystApp) {
       return res.status(400).json({ error: 'Missing site analysis data' });
     }
 
-    const genAI = await getAI(catalystApp);
+    const genAI = await getAI();
 
     const prompt = `Based on this site analysis, provide irrigation design recommendations.
 Site Analysis: ${JSON.stringify(siteAnalysis)}
@@ -170,7 +161,7 @@ Soil type: ${projectInput?.soilType || 'clay'}`;
   }
 }
 
-async function handleValidateDesign(req, res, catalystApp) {
+async function handleValidateDesign(req, res) {
   try {
     const { designSummary } = req.body;
 
@@ -178,7 +169,7 @@ async function handleValidateDesign(req, res, catalystApp) {
       return res.status(400).json({ error: 'Missing design summary' });
     }
 
-    const genAI = await getAI(catalystApp);
+    const genAI = await getAI();
 
     const prompt = `Validate this irrigation design against professional standards.
 Design Summary:
@@ -213,8 +204,6 @@ Return: { valid: boolean, issues: string[], recommendations: string[] }`;
 
 // Main handler for Catalyst Advanced I/O function
 export default async function handler(req, res) {
-  const catalystApp = catalyst.initialize(req);
-
   // Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -229,11 +218,11 @@ export default async function handler(req, res) {
   try {
     switch (path) {
       case '/analyze-site':
-        return handleAnalyzeSite(req, res, catalystApp);
+        return handleAnalyzeSite(req, res);
       case '/design-recommendations':
-        return handleDesignRecommendations(req, res, catalystApp);
+        return handleDesignRecommendations(req, res);
       case '/validate-design':
-        return handleValidateDesign(req, res, catalystApp);
+        return handleValidateDesign(req, res);
       case '/health':
         return res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
       default:

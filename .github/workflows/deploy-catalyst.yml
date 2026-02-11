@@ -35,7 +35,7 @@ jobs:
       - name: Install function dependencies
         run: |
           cd functions/gemini_proxy
-          npm ci
+          npm install
           cd ../..
 
       - name: Install Zoho Catalyst CLI
