@@ -38,46 +38,24 @@ export default async function handler(req, res) {
 
     const ai = new GoogleGenAI({ apiKey });
 
-    // Build scale context
-    let scaleContext = '';
-    if (projectInput?.propertyWidthFt && projectInput?.propertyLengthFt) {
-      scaleContext = `PROPERTY DIMENSIONS (use these for accurate scale):
-- Property Width: ${projectInput.propertyWidthFt} feet
-- Property Length: ${projectInput.propertyLengthFt} feet
-- Total Property Area: ${projectInput.propertyWidthFt * projectInput.propertyLengthFt} square feet
-
-Use these dimensions to calculate all other measurements proportionally.`;
-    } else if (projectInput?.scaleReferenceFt && projectInput?.scaleReferenceDescription) {
-      scaleContext = `SCALE REFERENCE (use this for accurate measurements):
-- The "${projectInput.scaleReferenceDescription}" in this image is ${projectInput.scaleReferenceFt} feet
-- Use this known distance to calculate all other measurements proportionally`;
-    }
-
     const prompt = `Analyze this drone/aerial image of a property for irrigation design.
-
-${scaleContext}
 
 TASK: Identify all irrigable zones, hardscape areas, structures, and obstacles.
 
 REQUIREMENTS:
-1. Use the scale reference provided above to measure all areas in FEET accurately
-2. Identify turf zones with boundaries (as polygon coordinates)
+1. Measure all areas in FEET (estimate from visual scale)
+2. Identify turf zones with boundaries
 3. Identify bed/planter zones
 4. Mark hardscape (driveways, walks, patios)
-5. Locate structures and trees with their positions
+5. Locate structures and trees
 6. Note any slopes or drainage patterns
-7. Return propertyWidthFt and propertyLengthFt based on the scale
 
 PROJECT CONTEXT:
 - Application type: ${projectInput?.applicationType || 'commercial'}
 - Turf type: ${projectInput?.turfType || 'bermudagrass'}
 - Soil type: ${projectInput?.soilType || 'clay'}
 
-Return a complete site analysis JSON with:
-- propertyWidthFt, propertyLengthFt, totalIrrigableSqFt
-- turfZones array with id, type, shape, widthFt, lengthFt, areaFt2, exposure, centerX, centerY, boundaryPoints
-- bedZones, narrowStrips, hardscapeBoundaries, structures, treeCanopyAreas
-- nearestBuildingLocation, waterSourceLocation (if visible)`;
+Return a complete site analysis with all zone boundaries as polygon coordinates.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
@@ -104,17 +82,9 @@ Return a complete site analysis JSON with:
     if (!parsed.slopeIndicators) parsed.slopeIndicators = [];
     if (!parsed.treeCanopyAreas) parsed.treeCanopyAreas = [];
     if (!parsed.nearestBuildingLocation) parsed.nearestBuildingLocation = { x: 10, y: 10 };
-
-    // Use provided dimensions as fallback, or defaults
-    if (!parsed.propertyWidthFt) {
-      parsed.propertyWidthFt = projectInput?.propertyWidthFt || 100;
-    }
-    if (!parsed.propertyLengthFt) {
-      parsed.propertyLengthFt = projectInput?.propertyLengthFt || 100;
-    }
-    if (!parsed.totalIrrigableSqFt) {
-      parsed.totalIrrigableSqFt = parsed.propertyWidthFt * parsed.propertyLengthFt * 0.7; // Estimate 70% irrigable
-    }
+    if (!parsed.propertyWidthFt) parsed.propertyWidthFt = 100;
+    if (!parsed.propertyLengthFt) parsed.propertyLengthFt = 100;
+    if (!parsed.totalIrrigableSqFt) parsed.totalIrrigableSqFt = 5000;
 
     res.status(200).json(parsed);
   } catch (error) {

@@ -51,12 +51,6 @@ const ProjectForm: React.FC<Props> = ({ onSubmit, disabled }) => {
   const [isCompressing, setIsCompressing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Scale/dimension fields
-  const [propertyWidthFt, setPropertyWidthFt] = useState<number | ''>('');
-  const [propertyLengthFt, setPropertyLengthFt] = useState<number | ''>('');
-  const [scaleReferenceFt, setScaleReferenceFt] = useState<number | ''>('');
-  const [scaleReferenceDescription, setScaleReferenceDescription] = useState('');
-
   const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -96,14 +90,6 @@ const ProjectForm: React.FC<Props> = ({ onSubmit, disabled }) => {
     e.preventDefault();
     if (!imageFile || !imagePreview || !projectName.trim() || isCompressing) return;
 
-    // Require at least property dimensions OR a scale reference
-    const hasPropertyDimensions = propertyWidthFt && propertyLengthFt;
-    const hasScaleReference = scaleReferenceFt && scaleReferenceDescription.trim();
-    if (!hasPropertyDimensions && !hasScaleReference) {
-      alert('Please provide either property dimensions (width & length) or a scale reference.');
-      return;
-    }
-
     const base64 = imagePreview.split(',')[1];
     onSubmit({
       projectName: projectName.trim(),
@@ -115,10 +101,6 @@ const ProjectForm: React.FC<Props> = ({ onSubmit, disabled }) => {
       droneImageBase64: base64,
       droneImageMimeType: compressedMimeType,
       droneImagePreviewUrl: imagePreview,
-      propertyWidthFt: propertyWidthFt || undefined,
-      propertyLengthFt: propertyLengthFt || undefined,
-      scaleReferenceFt: scaleReferenceFt || undefined,
-      scaleReferenceDescription: scaleReferenceDescription.trim() || undefined,
     });
   };
 
@@ -182,70 +164,6 @@ const ProjectForm: React.FC<Props> = ({ onSubmit, disabled }) => {
             className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
             required
           />
-        </div>
-
-        {/* Property Scale/Dimensions - Required for accurate measurements */}
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-4">
-          <div>
-            <h3 className="text-sm font-bold text-blue-900 mb-1">Property Scale (Required)</h3>
-            <p className="text-xs text-blue-700">Provide property dimensions OR a known distance for accurate measurements.</p>
-          </div>
-
-          {/* Property Dimensions */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">Property Width (ft)</label>
-              <input
-                type="number"
-                value={propertyWidthFt}
-                onChange={e => setPropertyWidthFt(e.target.value ? parseFloat(e.target.value) : '')}
-                placeholder="e.g., 150"
-                min={10}
-                max={2000}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">Property Length (ft)</label>
-              <input
-                type="number"
-                value={propertyLengthFt}
-                onChange={e => setPropertyLengthFt(e.target.value ? parseFloat(e.target.value) : '')}
-                placeholder="e.g., 200"
-                min={10}
-                max={2000}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
-            </div>
-          </div>
-
-          <div className="text-center text-xs text-gray-500">— OR use a known distance —</div>
-
-          {/* Scale Reference */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">Known Distance (ft)</label>
-              <input
-                type="number"
-                value={scaleReferenceFt}
-                onChange={e => setScaleReferenceFt(e.target.value ? parseFloat(e.target.value) : '')}
-                placeholder="e.g., 20"
-                min={1}
-                max={500}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">What is it?</label>
-              <input
-                type="text"
-                value={scaleReferenceDescription}
-                onChange={e => setScaleReferenceDescription(e.target.value)}
-                placeholder="e.g., driveway width"
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
-            </div>
-          </div>
         </div>
 
         {/* Grid of dropdowns */}
