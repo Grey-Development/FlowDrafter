@@ -11,6 +11,27 @@ export enum WorkflowStatus {
   ERROR = 'ERROR',
 }
 
+// Point on image (normalized 0-1 coordinates)
+export interface ImagePoint {
+  x: number; // 0-1 (percentage of image width)
+  y: number; // 0-1 (percentage of image height)
+}
+
+// Scale reference from two marked points
+export interface ScaleReference {
+  point1: ImagePoint;
+  point2: ImagePoint;
+  distanceFt: number;
+}
+
+// User markup on the image
+export interface ImageMarkup {
+  scaleReference?: ScaleReference;
+  controllerLocation?: ImagePoint;
+  waterSourceLocation?: ImagePoint;
+  irrigationAreas?: ImagePoint[][]; // Array of polygons (each polygon is array of points)
+}
+
 export interface ProjectInput {
   projectName: string;
   waterSupplySize: 0.75 | 1 | 1.5 | 2;
@@ -21,6 +42,8 @@ export interface ProjectInput {
   droneImageBase64: string;
   droneImageMimeType: string;
   droneImagePreviewUrl: string;
+  // User markup on the image
+  imageMarkup?: ImageMarkup;
 }
 
 export interface IrrigableZone {
