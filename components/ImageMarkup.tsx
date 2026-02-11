@@ -54,6 +54,22 @@ const ImageMarkupComponent: React.FC<Props> = ({ imageUrl, markup, onMarkupChang
         break;
 
       case 'irrigation':
+        // Check if clicking near the first point to close the polygon
+        if (currentPolygon.length >= 3) {
+          const firstPoint = currentPolygon[0];
+          const distance = Math.sqrt(
+            Math.pow(point.x - firstPoint.x, 2) + Math.pow(point.y - firstPoint.y, 2)
+          );
+          // If within 2% of image size, close the polygon
+          if (distance < 0.02) {
+            // Close the polygon
+            const areas = markup.irrigationAreas || [];
+            onMarkupChange({ ...markup, irrigationAreas: [...areas, currentPolygon] });
+            setCurrentPolygon([]);
+            setMode('none');
+            return;
+          }
+        }
         setCurrentPolygon([...currentPolygon, point]);
         break;
     }
@@ -141,25 +157,25 @@ const ImageMarkupComponent: React.FC<Props> = ({ imageUrl, markup, onMarkupChang
   const renderPolygons = () => {
     const areas = markup.irrigationAreas || [];
     return (
-      <svg className="absolute inset-0 w-full h-full pointer-events-none">
+      <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
         {areas.map((polygon, i) => (
           <g key={i}>
             <polygon
-              points={polygon.map(p => `${p.x * 100}%,${p.y * 100}%`).join(' ')}
+              points={polygon.map(p => `${p.x * 100},${p.y * 100}`).join(' ')}
               fill="rgba(34, 197, 94, 0.25)"
               stroke="#16A34A"
-              strokeWidth="3"
+              strokeWidth="0.5"
             />
             {/* Vertex markers for completed polygons */}
             {polygon.map((p, j) => (
               <circle
                 key={j}
-                cx={`${p.x * 100}%`}
-                cy={`${p.y * 100}%`}
-                r="4"
+                cx={p.x * 100}
+                cy={p.y * 100}
+                r="0.8"
                 fill="#16A34A"
                 stroke="#fff"
-                strokeWidth="1"
+                strokeWidth="0.2"
               />
             ))}
           </g>
@@ -169,17 +185,17 @@ const ImageMarkupComponent: React.FC<Props> = ({ imageUrl, markup, onMarkupChang
             {/* Use polyline during drawing to show connecting lines */}
             {currentPolygon.length >= 2 && (
               <polyline
-                points={currentPolygon.map(p => `${p.x * 100}%,${p.y * 100}%`).join(' ')}
+                points={currentPolygon.map(p => `${p.x * 100},${p.y * 100}`).join(' ')}
                 fill="none"
                 stroke="#22C55E"
-                strokeWidth="3"
-                strokeDasharray="8 4"
+                strokeWidth="0.5"
+                strokeDasharray="1 0.5"
               />
             )}
             {/* Show filled polygon preview only when we have 3+ points */}
             {currentPolygon.length >= 3 && (
               <polygon
-                points={currentPolygon.map(p => `${p.x * 100}%,${p.y * 100}%`).join(' ')}
+                points={currentPolygon.map(p => `${p.x * 100},${p.y * 100}`).join(' ')}
                 fill="rgba(34, 197, 94, 0.15)"
                 stroke="none"
               />
@@ -188,12 +204,12 @@ const ImageMarkupComponent: React.FC<Props> = ({ imageUrl, markup, onMarkupChang
             {currentPolygon.map((p, i) => (
               <circle
                 key={i}
-                cx={`${p.x * 100}%`}
-                cy={`${p.y * 100}%`}
-                r="5"
-                fill="#22C55E"
+                cx={p.x * 100}
+                cy={p.y * 100}
+                r={i === 0 && currentPolygon.length >= 3 ? 1.2 : 0.8}
+                fill={i === 0 && currentPolygon.length >= 3 ? '#16A34A' : '#22C55E'}
                 stroke="#fff"
-                strokeWidth="2"
+                strokeWidth="0.3"
               />
             ))}
           </>
@@ -209,7 +225,9 @@ const ImageMarkupComponent: React.FC<Props> = ({ imageUrl, markup, onMarkupChang
       case 'scaleConfirm': return 'Enter the distance between the two points and click Confirm';
       case 'controller': return 'Click where the controller should be located';
       case 'waterSource': return 'Click where the water source/POC is located';
-      case 'irrigation': return 'Click to draw irrigation area. Click "Done" when finished.';
+      case 'irrigation': return currentPolygon.length >= 3
+        ? 'Click near the first point (highlighted) to close the shape, or continue adding points'
+        : 'Click to place points. Need at least 3 points to create an area';
       default: return 'Select a tool below to mark up the image';
     }
   };
