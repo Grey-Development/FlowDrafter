@@ -16,9 +16,9 @@ export default defineConfig(({ mode }) => {
         port: 3000,
         host: '0.0.0.0',
       },
-      // Build output to 'client' folder for Zoho Catalyst
+      // Build output to 'dist' folder (Catalyst GitHub integration expects this)
       build: {
-        outDir: 'client',
+        outDir: 'dist',
         emptyOutDir: true,
       },
       plugins: [react(), tailwindcss()],
