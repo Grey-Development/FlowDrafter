@@ -90,8 +90,8 @@ const ImageMarkupComponent: React.FC<Props> = ({ imageUrl, markup, onMarkupChang
       className="absolute transform -translate-x-1/2 -translate-y-1/2 pointer-events-none"
       style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}
     >
-      <div className={`w-6 h-6 rounded-full border-2 ${color} flex items-center justify-center bg-white shadow-lg`}>
-        <span className="text-xs font-bold">{label}</span>
+      <div className={`w-4 h-4 rounded-full border-2 ${color} flex items-center justify-center bg-white shadow`}>
+        <span className="text-[9px] font-bold leading-none">{label}</span>
       </div>
     </div>
   );
