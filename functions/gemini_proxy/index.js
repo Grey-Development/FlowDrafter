@@ -3,18 +3,18 @@
  * Securely proxies requests to Google Gemini API
  */
 
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 
-// Initialize Gemini AI (API key from environment variable)
+// Initialize Gemini AI (API key from Catalyst environment variable)
 let ai = null;
 
-async function getAI() {
+function getAI() {
   if (!ai) {
-    // Get API key from environment variable (set in Catalyst console)
+    // Get API key from Catalyst environment variable
     const apiKey = process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
-      throw new Error('GEMINI_API_KEY environment variable not configured');
+      throw new Error('GEMINI_API_KEY not configured. Please set it in Catalyst Console > Functions > gemini_proxy > Configuration > Environment Variables');
     }
 
     ai = new GoogleGenAI({ apiKey });
@@ -22,214 +22,234 @@ async function getAI() {
   return ai;
 }
 
-// Site Analysis Schema
-const SITE_ANALYSIS_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    totalIrrigableSqFt: { type: Type.NUMBER },
-    propertyWidthFt: { type: Type.NUMBER },
-    propertyLengthFt: { type: Type.NUMBER },
-    turfZones: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          id: { type: Type.STRING },
-          type: { type: Type.STRING, enum: ['turf'] },
-          shape: { type: Type.STRING, enum: ['rectangular', 'irregular', 'circular', 'L-shaped', 'triangular'] },
-          widthFt: { type: Type.NUMBER },
-          lengthFt: { type: Type.NUMBER },
-          areaFt2: { type: Type.NUMBER },
-          exposure: { type: Type.STRING, enum: ['full-sun', 'partial-shade', 'full-shade'] },
-          slopeRatio: { type: Type.STRING, nullable: true },
-          centerX: { type: Type.NUMBER },
-          centerY: { type: Type.NUMBER },
-          boundaryPoints: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: { x: { type: Type.NUMBER }, y: { type: Type.NUMBER } },
-              required: ['x', 'y'],
-            },
-          },
-        },
-        required: ['id', 'type', 'shape', 'widthFt', 'lengthFt', 'areaFt2', 'exposure', 'centerX', 'centerY', 'boundaryPoints'],
-      },
-    },
-    bedZones: { type: Type.ARRAY, items: { type: Type.OBJECT } },
-    narrowStrips: { type: Type.ARRAY, items: { type: Type.OBJECT } },
-    hardscapeBoundaries: { type: Type.ARRAY, items: { type: Type.OBJECT } },
-    structures: { type: Type.ARRAY, items: { type: Type.OBJECT } },
-    slopeIndicators: { type: Type.ARRAY, items: { type: Type.OBJECT } },
-    treeCanopyAreas: { type: Type.ARRAY, items: { type: Type.OBJECT } },
-    waterSourceLocation: { type: Type.OBJECT, nullable: true },
-    controllerLocation: { type: Type.OBJECT, nullable: true },
-    nearestBuildingLocation: { type: Type.OBJECT },
-  },
-  required: [
-    'totalIrrigableSqFt', 'propertyWidthFt', 'propertyLengthFt',
-    'turfZones', 'bedZones', 'narrowStrips',
-    'hardscapeBoundaries', 'structures', 'slopeIndicators',
-    'treeCanopyAreas', 'nearestBuildingLocation',
-  ],
-};
+// Expert system instruction for irrigation design
+const EXPERT_SYSTEM_INSTRUCTION = `You are a Certified Irrigation Designer (CID) with 25 years of experience in commercial and residential irrigation design. You specialize in water-efficient systems that meet local codes and industry best practices.
 
-// Expert system instruction
-const EXPERT_SYSTEM_INSTRUCTION = `You are a Certified Irrigation Designer (CID) with 25 years of experience in commercial irrigation design...`;
+Key expertise:
+- Head selection and spacing for optimal coverage
+- Hydraulic calculations and pipe sizing
+- Zone design and valve placement
+- Controller programming and smart irrigation
+- Local water regulations and backflow requirements
+- Precipitation rate matching and pressure management`;
 
 // Route handlers
-async function handleAnalyzeSite(req, res) {
-  try {
-    const { base64Image, mimeType, projectInput } = req.body;
+async function handleAnalyzeSite(body) {
+  const { base64Image, mimeType, projectInput } = body;
 
-    if (!base64Image || !mimeType) {
-      return res.status(400).json({ error: 'Missing image data' });
-    }
-
-    const genAI = await getAI();
-
-    const prompt = `Analyze this drone/aerial image of a property for irrigation design.
-Identify all irrigable zones (turf, beds, planters), hardscape areas, structures, and obstacles.
-Return measurements in feet. Use the scale reference if visible.
-Application type: ${projectInput?.applicationType || 'commercial'}
-Turf type: ${projectInput?.turfType || 'bermudagrass'}`;
-
-    const response = await genAI.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: {
-        parts: [
-          { inlineData: { data: base64Image, mimeType } },
-          { text: prompt },
-        ],
-      },
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: SITE_ANALYSIS_SCHEMA,
-        systemInstruction: EXPERT_SYSTEM_INSTRUCTION,
-      },
-    });
-
-    const parsed = JSON.parse(response.text || '{}');
-
-    // Ensure arrays exist
-    if (!parsed.turfZones) parsed.turfZones = [];
-    if (!parsed.bedZones) parsed.bedZones = [];
-    if (!parsed.narrowStrips) parsed.narrowStrips = [];
-    if (!parsed.hardscapeBoundaries) parsed.hardscapeBoundaries = [];
-    if (!parsed.structures) parsed.structures = [];
-    if (!parsed.slopeIndicators) parsed.slopeIndicators = [];
-    if (!parsed.treeCanopyAreas) parsed.treeCanopyAreas = [];
-    if (!parsed.nearestBuildingLocation) parsed.nearestBuildingLocation = { x: 10, y: 10 };
-
-    res.status(200).json(parsed);
-  } catch (error) {
-    console.error('Site analysis error:', error);
-    res.status(500).json({ error: 'Site analysis failed', message: error.message });
+  if (!base64Image || !mimeType) {
+    return { status: 400, body: { error: 'Missing image data' } };
   }
+
+  const genAI = getAI();
+
+  const prompt = `Analyze this drone/aerial image of a property for irrigation design.
+
+TASK: Identify all irrigable zones, hardscape areas, structures, and obstacles.
+
+REQUIREMENTS:
+1. Measure all areas in FEET (estimate from visual scale)
+2. Identify turf zones with boundaries
+3. Identify bed/planter zones
+4. Mark hardscape (driveways, walks, patios)
+5. Locate structures and trees
+6. Note any slopes or drainage patterns
+
+PROJECT CONTEXT:
+- Application type: ${projectInput?.applicationType || 'commercial'}
+- Turf type: ${projectInput?.turfType || 'bermudagrass'}
+- Soil type: ${projectInput?.soilType || 'clay'}
+
+Return a complete site analysis with all zone boundaries as polygon coordinates.`;
+
+  const response = await genAI.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: {
+      parts: [
+        { inlineData: { data: base64Image, mimeType } },
+        { text: prompt },
+      ],
+    },
+    config: {
+      responseMimeType: 'application/json',
+      systemInstruction: EXPERT_SYSTEM_INSTRUCTION,
+    },
+  });
+
+  const parsed = JSON.parse(response.text || '{}');
+
+  // Ensure arrays exist
+  if (!parsed.turfZones) parsed.turfZones = [];
+  if (!parsed.bedZones) parsed.bedZones = [];
+  if (!parsed.narrowStrips) parsed.narrowStrips = [];
+  if (!parsed.hardscapeBoundaries) parsed.hardscapeBoundaries = [];
+  if (!parsed.structures) parsed.structures = [];
+  if (!parsed.slopeIndicators) parsed.slopeIndicators = [];
+  if (!parsed.treeCanopyAreas) parsed.treeCanopyAreas = [];
+  if (!parsed.nearestBuildingLocation) parsed.nearestBuildingLocation = { x: 10, y: 10 };
+  if (!parsed.propertyWidthFt) parsed.propertyWidthFt = 100;
+  if (!parsed.propertyLengthFt) parsed.propertyLengthFt = 100;
+  if (!parsed.totalIrrigableSqFt) parsed.totalIrrigableSqFt = 5000;
+
+  return { status: 200, body: parsed };
 }
 
-async function handleDesignRecommendations(req, res) {
-  try {
-    const { siteAnalysis, projectInput } = req.body;
+async function handleDesignRecommendations(body) {
+  const { siteAnalysis, projectInput } = body;
 
-    if (!siteAnalysis) {
-      return res.status(400).json({ error: 'Missing site analysis data' });
-    }
-
-    const genAI = await getAI();
-
-    const prompt = `Based on this site analysis, provide irrigation design recommendations.
-Site Analysis: ${JSON.stringify(siteAnalysis)}
-Application: ${projectInput?.applicationType || 'commercial'}
-Water supply: ${projectInput?.waterSupplySize || 1.5}" at ${projectInput?.staticPressurePSI || 60} PSI
-Soil type: ${projectInput?.soilType || 'clay'}`;
-
-    const response = await genAI.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: { parts: [{ text: prompt }] },
-      config: {
-        responseMimeType: 'application/json',
-        systemInstruction: EXPERT_SYSTEM_INSTRUCTION,
-      },
-    });
-
-    const result = JSON.parse(response.text || '{}');
-    res.status(200).json(result);
-  } catch (error) {
-    console.error('Design recommendations error:', error);
-    res.status(500).json({ error: 'Design recommendations failed', message: error.message });
+  if (!siteAnalysis) {
+    return { status: 400, body: { error: 'Missing site analysis data' } };
   }
+
+  const genAI = getAI();
+
+  const prompt = `Based on this site analysis, provide irrigation design recommendations.
+
+SITE ANALYSIS:
+${JSON.stringify(siteAnalysis, null, 2)}
+
+PROJECT PARAMETERS:
+- Application: ${projectInput?.applicationType || 'commercial'}
+- Water supply: ${projectInput?.waterSupplySize || 1.5}" meter at ${projectInput?.staticPressurePSI || 60} PSI
+- Soil type: ${projectInput?.soilType || 'clay'}
+- Turf type: ${projectInput?.turfType || 'bermudagrass'}
+
+Provide recommendations for:
+1. Head types for each zone
+2. Suggested zone groupings
+3. Mainline and lateral sizing
+4. Special considerations
+
+Return as JSON with: headRecommendations, zoneStrategy, pipeSizing, specialNotes`;
+
+  const response = await genAI.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: { parts: [{ text: prompt }] },
+    config: {
+      responseMimeType: 'application/json',
+      systemInstruction: EXPERT_SYSTEM_INSTRUCTION,
+    },
+  });
+
+  const result = JSON.parse(response.text || '{}');
+  return { status: 200, body: result };
 }
 
-async function handleValidateDesign(req, res) {
-  try {
-    const { designSummary } = req.body;
+async function handleValidateDesign(body) {
+  const { designSummary } = body;
 
-    if (!designSummary) {
-      return res.status(400).json({ error: 'Missing design summary' });
-    }
+  if (!designSummary) {
+    return { status: 400, body: { error: 'Missing design summary' } };
+  }
 
-    const genAI = await getAI();
+  const genAI = getAI();
 
-    const prompt = `Validate this irrigation design against professional standards.
-Design Summary:
+  const prompt = `Validate this irrigation design against professional standards and Georgia regulations.
+
+DESIGN SUMMARY:
 - Total zones: ${designSummary.totalZones}
 - Peak demand: ${designSummary.totalGPM} GPM
-- Head types: ${designSummary.headTypes?.join(', ')}
-- Rain sensor: ${designSummary.hasRainSensor ? 'Yes' : 'NO'}
-- Backflow: ${designSummary.hasBackflow ? 'Yes' : 'NO'}
+- Head types: ${designSummary.headTypes?.join(', ') || 'unknown'}
+- Mainline size: ${designSummary.mainlineSize}"
+- Rain sensor: ${designSummary.hasRainSensor ? 'Yes' : 'NO - REQUIRED BY GEORGIA LAW'}
+- Backflow preventer: ${designSummary.hasBackflow ? 'Yes' : 'NO - REQUIRED'}
 
-Return: { valid: boolean, issues: string[], recommendations: string[] }`;
+VALIDATION CRITERIA:
+1. Georgia requires rain sensors on all automatic irrigation systems
+2. Backflow prevention is required per plumbing code
+3. Zone GPM should not exceed 75% of available supply
+4. Head types should not be mixed within zones
+5. Precipitation rates should be matched
 
-    const response = await genAI.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: { parts: [{ text: prompt }] },
-      config: {
-        responseMimeType: 'application/json',
-        systemInstruction: EXPERT_SYSTEM_INSTRUCTION,
-      },
-    });
+Return JSON: { valid: boolean, issues: string[], recommendations: string[] }`;
 
-    const result = JSON.parse(response.text || '{}');
-    res.status(200).json({
+  const response = await genAI.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: { parts: [{ text: prompt }] },
+    config: {
+      responseMimeType: 'application/json',
+      systemInstruction: EXPERT_SYSTEM_INSTRUCTION,
+    },
+  });
+
+  const result = JSON.parse(response.text || '{}');
+  return {
+    status: 200,
+    body: {
       valid: result.valid ?? false,
       issues: result.issues ?? [],
       recommendations: result.recommendations ?? [],
-    });
-  } catch (error) {
-    console.error('Validate design error:', error);
-    res.status(500).json({ error: 'Design validation failed', message: error.message });
-  }
+    },
+  };
 }
 
 // Main handler for Catalyst Advanced I/O function
-export default async function handler(req, res) {
-  // Enable CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+export default async function handler(request, response) {
+  // Set CORS headers
+  response.setHeader('Access-Control-Allow-Origin', '*');
+  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  // Handle preflight
+  if (request.method === 'OPTIONS') {
+    return response.status(200).send();
   }
 
-  const path = req.url?.split('?')[0] || '';
+  // Get the path - Catalyst provides the path after the function name
+  const url = request.url || '';
+  const path = url.split('?')[0];
+
+  console.log(`[gemini_proxy] ${request.method} ${path}`);
 
   try {
+    // Health check
+    if (path === '/health' || path === '') {
+      const hasApiKey = !!process.env.GEMINI_API_KEY;
+      return response.status(200).json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        apiKeyConfigured: hasApiKey,
+        message: hasApiKey ? 'Ready' : 'WARNING: GEMINI_API_KEY not configured',
+      });
+    }
+
+    // Parse body for POST requests
+    let body = {};
+    if (request.method === 'POST') {
+      body = request.body || {};
+    }
+
+    let result;
+
     switch (path) {
       case '/analyze-site':
-        return handleAnalyzeSite(req, res);
+        result = await handleAnalyzeSite(body);
+        break;
       case '/design-recommendations':
-        return handleDesignRecommendations(req, res);
+        result = await handleDesignRecommendations(body);
+        break;
       case '/validate-design':
-        return handleValidateDesign(req, res);
-      case '/health':
-        return res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+        result = await handleValidateDesign(body);
+        break;
       default:
-        return res.status(404).json({ error: 'Not found' });
+        result = { status: 404, body: { error: `Endpoint not found: ${path}` } };
     }
+
+    return response.status(result.status).json(result.body);
   } catch (error) {
-    console.error('Handler error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('[gemini_proxy] Error:', error.message);
+
+    // Check if it's an API key error
+    if (error.message.includes('GEMINI_API_KEY')) {
+      return response.status(500).json({
+        error: 'API key not configured',
+        message: 'Please set GEMINI_API_KEY in Catalyst Console > Functions > gemini_proxy > Configuration',
+      });
+    }
+
+    return response.status(500).json({
+      error: 'Request failed',
+      message: error.message,
+    });
   }
 }
