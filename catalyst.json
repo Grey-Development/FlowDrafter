@@ -2,7 +2,7 @@
   "project_id": "",
   "project_name": "flowdrafter",
   "client": {
-    "build_path": "client",
+    "build_path": "dist",
     "index": "index.html"
   },
   "functions": {

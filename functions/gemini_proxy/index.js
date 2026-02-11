@@ -1,12 +1,17 @@
 'use strict';
 
-const { GoogleGenAI } = require('@google/genai');
-
-// Initialize Gemini AI (API key from Catalyst environment variable)
+// Note: @google/genai is an ES Module, so we must use dynamic import()
+let GoogleGenAI = null;
 let ai = null;
 
-function getAI() {
+async function getAI() {
   if (!ai) {
+    // Dynamic import for ES Module compatibility
+    if (!GoogleGenAI) {
+      const module = await import('@google/genai');
+      GoogleGenAI = module.GoogleGenAI;
+    }
+
     // Get API key from Catalyst environment variable
     const apiKey = process.env.GEMINI_API_KEY;
 
@@ -38,7 +43,7 @@ async function handleAnalyzeSite(body) {
     return { status: 400, body: { error: 'Missing image data' } };
   }
 
-  const genAI = getAI();
+  const genAI = await getAI();
 
   const prompt = `Analyze this drone/aerial image of a property for irrigation design.
 
@@ -98,7 +103,7 @@ async function handleDesignRecommendations(body) {
     return { status: 400, body: { error: 'Missing site analysis data' } };
   }
 
-  const genAI = getAI();
+  const genAI = await getAI();
 
   const prompt = `Based on this site analysis, provide irrigation design recommendations.
 
@@ -139,7 +144,7 @@ async function handleValidateDesign(body) {
     return { status: 400, body: { error: 'Missing design summary' } };
   }
 
-  const genAI = getAI();
+  const genAI = await getAI();
 
   const prompt = `Validate this irrigation design against professional standards and Georgia regulations.
 
