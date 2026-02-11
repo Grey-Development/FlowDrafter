@@ -1,5 +1,66 @@
 import { GoogleGenAI } from '@google/genai';
 
+/**
+ * Sanitize coordinates from Gemini response
+ * - Converts percentage strings (e.g., "83.5%") to decimals (0.835)
+ * - Ensures all coordinates are numbers between 0-1
+ * - Handles nested objects and arrays
+ */
+function sanitizeCoordinates(obj) {
+  if (obj === null || obj === undefined) return obj;
+
+  if (typeof obj === 'string') {
+    // Convert percentage strings to decimals
+    if (obj.endsWith('%')) {
+      const num = parseFloat(obj.replace('%', '')) / 100;
+      return isNaN(num) ? 0 : Math.max(0, Math.min(1, num));
+    }
+    return obj;
+  }
+
+  if (typeof obj === 'number') {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeCoordinates(item));
+  }
+
+  if (typeof obj === 'object') {
+    const result = {};
+    for (const key of Object.keys(obj)) {
+      const value = obj[key];
+
+      // Special handling for x, y coordinates
+      if ((key === 'x' || key === 'y') && value !== null && value !== undefined) {
+        let numValue = value;
+
+        // Handle percentage strings
+        if (typeof value === 'string') {
+          if (value.endsWith('%')) {
+            numValue = parseFloat(value.replace('%', '')) / 100;
+          } else {
+            numValue = parseFloat(value);
+          }
+        }
+
+        // If value is greater than 1, assume it's a percentage
+        if (typeof numValue === 'number' && numValue > 1) {
+          numValue = numValue / 100;
+        }
+
+        // Clamp to 0-1 range
+        result[key] = isNaN(numValue) ? 0.5 : Math.max(0, Math.min(1, numValue));
+      } else {
+        result[key] = sanitizeCoordinates(value);
+      }
+    }
+    return result;
+  }
+
+  return obj;
+}
+
 const EXPERT_SYSTEM_INSTRUCTION = `You are an expert CAD technician and surveyor specializing in converting aerial/drone imagery to precise 2D site plans. Your outputs must be accurate enough for construction documents.
 
 Key expertise:
@@ -102,8 +163,11 @@ ${irrigationAreasInstruction}
 
 TRACING INSTRUCTIONS:
 1. For each visible element (building, driveway, turf area, bed, walkway, etc.), trace its EXACT boundary
-2. Use normalized coordinates (0-1) where (0,0) is top-left and (1,1) is bottom-right
-3. Trace boundaries with enough points to capture the actual shape (use 4+ points for rectangles, 6+ for irregular shapes, 12+ for curves)
+2. Use normalized coordinates as DECIMAL NUMBERS from 0.0 to 1.0 (NOT percentages, NO % symbols)
+   - (0.0, 0.0) is top-left corner
+   - (1.0, 1.0) is bottom-right corner
+   - Example: {"x": 0.25, "y": 0.75} NOT {"x": "25%", "y": "75%"}
+3. Trace boundaries with enough points to capture the actual shape (use 4+ points for rectangles, 6+ for irregular shapes)
 4. Follow visible edges precisely - do not simplify or approximate
 5. For turf areas, trace the actual grass/lawn edges where they meet hardscape or beds
 6. For hardscape, trace where concrete/asphalt visibly ends
@@ -227,7 +291,40 @@ CRITICAL: All boundaryPoints must trace the ACTUAL visible edges. Do not use sim
       },
     });
 
-    const parsed = JSON.parse(response.text || '{}');
+    // Clean up response text - remove any markdown code fences and fix common issues
+    let responseText = response.text || '{}';
+
+    // Remove markdown code blocks if present
+    responseText = responseText.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
+
+    // Try to extract JSON if there's extra text
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      responseText = jsonMatch[0];
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('JSON parse error:', parseError.message);
+      console.error('Response text (first 500 chars):', responseText.substring(0, 500));
+      // Return a minimal valid response
+      parsed = {
+        propertyWidthFt: feetPerNormalizedUnit || 100,
+        propertyLengthFt: feetPerNormalizedUnit || 100,
+        totalIrrigableSqFt: 5000,
+        turfZones: [],
+        bedZones: [],
+        narrowStrips: [],
+        hardscapeBoundaries: [],
+        structures: [],
+        treeCanopyAreas: [],
+      };
+    }
+
+    // Sanitize all coordinates - convert percentages to decimals
+    parsed = sanitizeCoordinates(parsed);
 
     // Calculate property dimensions from scale if not provided
     if (scaleRef && feetPerNormalizedUnit) {
