@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { ImagePoint, ImageMarkup, ScaleReference } from '../types';
 
-type MarkupMode = 'scale1' | 'scale2' | 'controller' | 'waterSource' | 'irrigation' | 'none';
+type MarkupMode = 'scale1' | 'scale2' | 'scaleConfirm' | 'controller' | 'waterSource' | 'irrigation' | 'none';
 
 interface Props {
   imageUrl: string;
@@ -12,6 +12,7 @@ interface Props {
 const ImageMarkupComponent: React.FC<Props> = ({ imageUrl, markup, onMarkupChange }) => {
   const [mode, setMode] = useState<MarkupMode>('none');
   const [scalePoint1, setScalePoint1] = useState<ImagePoint | null>(markup.scaleReference?.point1 || null);
+  const [scalePoint2, setScalePoint2] = useState<ImagePoint | null>(markup.scaleReference?.point2 || null);
   const [scaleDistance, setScaleDistance] = useState<number>(markup.scaleReference?.distanceFt || 0);
   const [currentPolygon, setCurrentPolygon] = useState<ImagePoint[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -36,17 +37,9 @@ const ImageMarkupComponent: React.FC<Props> = ({ imageUrl, markup, onMarkupChang
         break;
 
       case 'scale2':
-        if (scalePoint1 && scaleDistance > 0) {
-          const newMarkup = {
-            ...markup,
-            scaleReference: {
-              point1: scalePoint1,
-              point2: point,
-              distanceFt: scaleDistance,
-            },
-          };
-          onMarkupChange(newMarkup);
-          setMode('none');
+        if (scalePoint1) {
+          setScalePoint2(point);
+          setMode('scaleConfirm');
         }
         break;
 
@@ -82,7 +75,23 @@ const ImageMarkupComponent: React.FC<Props> = ({ imageUrl, markup, onMarkupChang
 
   const startScaleMode = () => {
     setScalePoint1(null);
+    setScalePoint2(null);
+    setScaleDistance(0);
     setMode('scale1');
+  };
+
+  const confirmScale = () => {
+    if (scalePoint1 && scalePoint2 && scaleDistance > 0) {
+      onMarkupChange({
+        ...markup,
+        scaleReference: {
+          point1: scalePoint1,
+          point2: scalePoint2,
+          distanceFt: scaleDistance,
+        },
+      });
+      setMode('none');
+    }
   };
 
   const renderMarker = (point: ImagePoint, color: string, label: string) => (
@@ -134,30 +143,45 @@ const ImageMarkupComponent: React.FC<Props> = ({ imageUrl, markup, onMarkupChang
     return (
       <svg className="absolute inset-0 w-full h-full pointer-events-none">
         {areas.map((polygon, i) => (
-          <polygon
-            key={i}
-            points={polygon.map(p => `${p.x * 100}%,${p.y * 100}%`).join(' ')}
-            fill="rgba(34, 197, 94, 0.3)"
-            stroke="#22C55E"
-            strokeWidth="2"
-          />
+          <g key={i}>
+            <polygon
+              points={polygon.map(p => `${p.x * 100}%,${p.y * 100}%`).join(' ')}
+              fill="rgba(34, 197, 94, 0.25)"
+              stroke="#16A34A"
+              strokeWidth="3"
+            />
+            {/* Vertex markers for completed polygons */}
+            {polygon.map((p, j) => (
+              <circle
+                key={j}
+                cx={`${p.x * 100}%`}
+                cy={`${p.y * 100}%`}
+                r="4"
+                fill="#16A34A"
+                stroke="#fff"
+                strokeWidth="1"
+              />
+            ))}
+          </g>
         ))}
         {currentPolygon.length > 0 && (
           <>
             <polygon
               points={currentPolygon.map(p => `${p.x * 100}%,${p.y * 100}%`).join(' ')}
-              fill="rgba(34, 197, 94, 0.2)"
+              fill="rgba(34, 197, 94, 0.15)"
               stroke="#22C55E"
-              strokeWidth="2"
-              strokeDasharray="4 2"
+              strokeWidth="3"
+              strokeDasharray="8 4"
             />
             {currentPolygon.map((p, i) => (
               <circle
                 key={i}
                 cx={`${p.x * 100}%`}
                 cy={`${p.y * 100}%`}
-                r="4"
+                r="5"
                 fill="#22C55E"
+                stroke="#fff"
+                strokeWidth="2"
               />
             ))}
           </>
@@ -170,6 +194,7 @@ const ImageMarkupComponent: React.FC<Props> = ({ imageUrl, markup, onMarkupChang
     switch (mode) {
       case 'scale1': return 'Click the FIRST point of a known distance';
       case 'scale2': return 'Click the SECOND point of the known distance';
+      case 'scaleConfirm': return 'Enter the distance between the two points and click Confirm';
       case 'controller': return 'Click where the controller should be located';
       case 'waterSource': return 'Click where the water source/POC is located';
       case 'irrigation': return 'Click to draw irrigation area. Click "Done" when finished.';
@@ -185,8 +210,8 @@ const ImageMarkupComponent: React.FC<Props> = ({ imageUrl, markup, onMarkupChang
       </div>
 
       {/* Scale distance input (shown when in scale mode) */}
-      {(mode === 'scale1' || mode === 'scale2') && (
-        <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg">
+      {(mode === 'scale1' || mode === 'scale2' || mode === 'scaleConfirm') && (
+        <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg flex-wrap">
           <label className="text-sm font-medium text-blue-800">Distance between points:</label>
           <input
             type="number"
@@ -196,6 +221,16 @@ const ImageMarkupComponent: React.FC<Props> = ({ imageUrl, markup, onMarkupChang
             className="w-24 px-3 py-1.5 border border-blue-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
           />
           <span className="text-sm text-blue-700">feet</span>
+          {mode === 'scaleConfirm' && (
+            <button
+              type="button"
+              onClick={confirmScale}
+              disabled={scaleDistance <= 0}
+              className="ml-auto px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              Confirm Scale
+            </button>
+          )}
         </div>
       )}
 
@@ -210,8 +245,24 @@ const ImageMarkupComponent: React.FC<Props> = ({ imageUrl, markup, onMarkupChang
         {/* Render scale line */}
         {renderScaleLine()}
 
-        {/* Render temporary scale point */}
-        {mode === 'scale2' && scalePoint1 && renderMarker(scalePoint1, 'border-blue-500 text-blue-600', '1')}
+        {/* Render temporary scale points during scale mode */}
+        {(mode === 'scale2' || mode === 'scaleConfirm') && scalePoint1 && renderMarker(scalePoint1, 'border-blue-500 text-blue-600', '1')}
+        {mode === 'scaleConfirm' && scalePoint2 && (
+          <>
+            {renderMarker(scalePoint2, 'border-blue-500 text-blue-600', '2')}
+            <svg className="absolute inset-0 w-full h-full pointer-events-none">
+              <line
+                x1={`${scalePoint1!.x * 100}%`}
+                y1={`${scalePoint1!.y * 100}%`}
+                x2={`${scalePoint2.x * 100}%`}
+                y2={`${scalePoint2.y * 100}%`}
+                stroke="#3B82F6"
+                strokeWidth="2"
+                strokeDasharray="6 3"
+              />
+            </svg>
+          </>
+        )}
 
         {/* Render controller marker */}
         {markup.controllerLocation && renderMarker(markup.controllerLocation, 'border-purple-500 text-purple-600', 'C')}
@@ -229,7 +280,7 @@ const ImageMarkupComponent: React.FC<Props> = ({ imageUrl, markup, onMarkupChang
           type="button"
           onClick={startScaleMode}
           className={`px-3 py-2 text-sm rounded-lg font-medium transition-colors ${
-            mode === 'scale1' || mode === 'scale2'
+            mode === 'scale1' || mode === 'scale2' || mode === 'scaleConfirm'
               ? 'bg-blue-600 text-white'
               : markup.scaleReference
                 ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
