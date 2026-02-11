@@ -1,6 +1,15 @@
 import React, { useState } from 'react';
 import { PlanSheet, IrrigationDesign } from '../types';
-import { exportPDF } from '../services/pdfExportService';
+import { exportPDF, EXPORT_PRESETS, ExportConfig, estimateFileSize } from '../services/pdfExportService';
+
+type ExportQuality = 'standard' | 'highQuality' | 'printReady' | 'printReadyCompressed';
+
+const QUALITY_OPTIONS: Array<{ value: ExportQuality; label: string; description: string }> = [
+  { value: 'standard', label: 'Screen (72 DPI)', description: 'Fast, smaller file ~2-5 MB' },
+  { value: 'highQuality', label: 'Office Print (150 DPI)', description: 'Good quality ~8-15 MB' },
+  { value: 'printReady', label: 'Professional (300 DPI)', description: 'Print-ready HD ~20-40 MB' },
+  { value: 'printReadyCompressed', label: 'Professional Compressed', description: 'HD JPEG ~10-20 MB' },
+];
 
 interface Props {
   sheets: PlanSheet[];
@@ -13,6 +22,7 @@ interface Props {
 
 const ExportControls: React.FC<Props> = ({ sheets, design, projectName, exporting, onExportStart, onExportEnd }) => {
   const [selectedSheets, setSelectedSheets] = useState<Set<number>>(new Set([0, 1, 2]));
+  const [quality, setQuality] = useState<ExportQuality>('printReady');
 
   const toggleSheet = (index: number) => {
     setSelectedSheets(prev => {
@@ -27,7 +37,8 @@ const ExportControls: React.FC<Props> = ({ sheets, design, projectName, exportin
     onExportStart();
     try {
       const sheetsToExport = sheets.filter((_, i) => selectedSheets.has(i));
-      await exportPDF(sheetsToExport, projectName);
+      const config = EXPORT_PRESETS[quality];
+      await exportPDF(sheetsToExport, projectName, config);
     } catch (err) {
       console.error('PDF export failed:', err);
       alert('PDF export failed. Please try again.');
@@ -35,6 +46,8 @@ const ExportControls: React.FC<Props> = ({ sheets, design, projectName, exportin
       onExportEnd();
     }
   };
+
+  const fileSizeEstimate = estimateFileSize(selectedSheets.size, EXPORT_PRESETS[quality]);
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
@@ -56,10 +69,34 @@ const ExportControls: React.FC<Props> = ({ sheets, design, projectName, exportin
         ))}
       </div>
 
+      {/* Quality Selection */}
+      <div className="space-y-2">
+        <label className="block text-sm font-medium text-gray-700">Export Quality</label>
+        <div className="space-y-1">
+          {QUALITY_OPTIONS.map((option) => (
+            <label key={option.value} className="flex items-start gap-3 cursor-pointer p-2 rounded-lg hover:bg-gray-50">
+              <input
+                type="radio"
+                name="quality"
+                value={option.value}
+                checked={quality === option.value}
+                onChange={() => setQuality(option.value)}
+                className="mt-1 w-4 h-4 text-emerald-600 border-gray-300 focus:ring-emerald-500"
+              />
+              <div>
+                <span className="text-sm font-medium text-gray-800">{option.label}</span>
+                <p className="text-xs text-gray-500">{option.description}</p>
+              </div>
+            </label>
+          ))}
+        </div>
+      </div>
+
       <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-600 space-y-1">
         <p>Format: ARCH D (24" x 36") PDF</p>
         <p>System: {design.totalZones} zones, {design.totalSystemGPM} GPM total</p>
         <p>Heads: {design.heads.length} | Pipe segments: {design.pipes.length}</p>
+        <p className="font-medium text-gray-700">Est. file size: {fileSizeEstimate.minMB}-{fileSizeEstimate.maxMB} MB</p>
       </div>
 
       <button

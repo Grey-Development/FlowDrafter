@@ -1,9 +1,65 @@
-import { GoogleGenAI, Type } from '@google/genai';
-import { SiteAnalysis, IrrigableZone, DesignRecommendations, ProjectInput } from '../types';
-import { SPRINKLER_HEADS } from '../data/materials';
-import { DESIGN_RULES } from '../data/designRules';
+/**
+ * Gemini AI Service
+ *
+ * In production: Uses Catalyst serverless function as proxy (secure)
+ * In development: Can use direct Gemini API with local API key
+ */
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+import { GoogleGenAI, Type } from '@google/genai';
+import { SiteAnalysis, DesignRecommendations, ProjectInput } from '../types';
+import {
+  EXPERT_SYSTEM_INSTRUCTION,
+  getSiteAnalysisPrompt,
+  getDesignRecommendationPrompt,
+  getHeadSelectionContext,
+  getZoneDesignContext,
+  getHydraulicContext,
+} from './knowledgePrompts';
+
+// ============================================================================
+// API CLIENT CONFIGURATION
+// ============================================================================
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+const USE_PROXY = API_BASE_URL.includes('/server/') || import.meta.env.PROD;
+
+// Direct Gemini client for local development
+let directAI: GoogleGenAI | null = null;
+function getDirectAI(): GoogleGenAI {
+  if (!directAI) {
+    const apiKey = process.env.GEMINI_API_KEY || '';
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY not configured for local development');
+    }
+    directAI = new GoogleGenAI({ apiKey });
+  }
+  return directAI;
+}
+
+// ============================================================================
+// PROXY API CLIENT (Production)
+// ============================================================================
+
+async function proxyRequest<T>(endpoint: string, body: object): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Request failed' }));
+    throw new Error(error.message || error.error || 'API request failed');
+  }
+
+  return response.json();
+}
+
+// ============================================================================
+// SITE ANALYSIS SCHEMA (for direct API calls)
+// ============================================================================
 
 const SITE_ANALYSIS_SCHEMA = {
   type: Type.OBJECT,
@@ -182,37 +238,35 @@ const SITE_ANALYSIS_SCHEMA = {
   ],
 };
 
+// ============================================================================
+// PUBLIC API FUNCTIONS
+// ============================================================================
+
+/**
+ * Analyze a site from drone imagery
+ */
 export async function analyzeSite(
   base64Image: string,
   mimeType: string,
   projectInput: Partial<ProjectInput>
 ): Promise<SiteAnalysis> {
-  const prompt = `You are a senior landscape architect and irrigation designer analyzing a drone aerial photograph of a property.
+  // Use proxy in production
+  if (USE_PROXY) {
+    const result = await proxyRequest<SiteAnalysis>('/analyze-site', {
+      base64Image,
+      mimeType,
+      projectInput,
+    });
+    return ensureDefaults(result);
+  }
 
-Analyze this image and identify all irrigable areas, hardscapes, structures, and site features. Return structured JSON data.
-
-IMPORTANT COORDINATE SYSTEM:
-- Use feet as units for all dimensions
-- Origin (0,0) is the top-left corner of the property
-- X increases to the right, Y increases downward
-- Estimate dimensions based on visible features (buildings, roads, parking areas provide scale reference)
-- For boundary points, trace the outline of each zone as a polygon
-
-Project context:
-- Application type: ${projectInput.applicationType || 'commercial'}
-- Turf type: ${projectInput.turfType || 'bermudagrass'}
-
-Identify:
-1. All turf areas (open grass) with approximate dimensions and shape
-2. All landscape bed areas (planted beds, planter boxes, tree rings)
-3. Any narrow strips less than 8 feet wide
-4. All hardscape boundaries (walkways, driveways, parking, buildings, patios)
-5. Structures with approximate footprints
-6. Slope indicators if visible
-7. Tree canopy areas that may need separate irrigation treatment
-8. The nearest building location (for controller placement)
-9. Any visible water source, utility connection, or water meter location
-10. Suggested controller location near nearest building`;
+  // Direct API call for local development
+  const ai = getDirectAI();
+  const prompt = getSiteAnalysisPrompt({
+    applicationType: projectInput.applicationType || 'commercial',
+    turfType: projectInput.turfType || 'bermudagrass',
+    soilType: projectInput.soilType,
+  });
 
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash',
@@ -225,12 +279,119 @@ Identify:
     config: {
       responseMimeType: 'application/json',
       responseSchema: SITE_ANALYSIS_SCHEMA,
-      systemInstruction: 'You are a senior landscape architect and certified irrigation designer with 20 years of experience in commercial irrigation system design in the Southeast United States. You specialize in analyzing aerial drone photography to identify irrigable zones, hardscape boundaries, and site conditions for irrigation plan development. Always provide realistic dimension estimates in feet.',
+      systemInstruction: EXPERT_SYSTEM_INSTRUCTION,
     },
   });
 
   const parsed = JSON.parse(response.text || '{}') as SiteAnalysis;
+  return ensureDefaults(parsed);
+}
 
+/**
+ * Get design recommendations based on site analysis
+ */
+export async function getDesignRecommendations(
+  siteAnalysis: SiteAnalysis,
+  projectInput: Partial<ProjectInput>
+): Promise<DesignRecommendations> {
+  // Use proxy in production
+  if (USE_PROXY) {
+    return proxyRequest<DesignRecommendations>('/design-recommendations', {
+      siteAnalysis,
+      projectInput,
+    });
+  }
+
+  // Direct API call for local development
+  const ai = getDirectAI();
+  const prompt = getDesignRecommendationPrompt(siteAnalysis, {
+    applicationType: projectInput.applicationType || 'commercial',
+    turfType: projectInput.turfType || 'bermudagrass',
+    soilType: projectInput.soilType || 'clay',
+    waterSupplySize: projectInput.waterSupplySize || 1.5,
+    staticPressurePSI: projectInput.staticPressurePSI || 60,
+  });
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: { parts: [{ text: prompt }] },
+    config: {
+      responseMimeType: 'application/json',
+      systemInstruction: EXPERT_SYSTEM_INSTRUCTION,
+    },
+  });
+
+  return JSON.parse(response.text || '{}') as DesignRecommendations;
+}
+
+/**
+ * Validate a completed design against professional standards
+ */
+export async function validateDesign(
+  designSummary: {
+    totalZones: number;
+    totalGPM: number;
+    headTypes: string[];
+    mainlineSize: number;
+    hasRainSensor: boolean;
+    hasBackflow: boolean;
+  }
+): Promise<{ valid: boolean; issues: string[]; recommendations: string[] }> {
+  // Use proxy in production
+  if (USE_PROXY) {
+    return proxyRequest<{ valid: boolean; issues: string[]; recommendations: string[] }>('/validate-design', {
+      designSummary,
+    });
+  }
+
+  // Direct API call for local development
+  const ai = getDirectAI();
+  const prompt = `Validate this irrigation design against professional standards and Georgia regulations.
+
+DESIGN SUMMARY:
+- Total zones: ${designSummary.totalZones}
+- Peak demand: ${designSummary.totalGPM} GPM
+- Head types used: ${designSummary.headTypes.join(', ')}
+- Mainline size: ${designSummary.mainlineSize}"
+- Rain sensor included: ${designSummary.hasRainSensor ? 'Yes' : 'NO - REQUIRED BY LAW'}
+- Backflow preventer included: ${designSummary.hasBackflow ? 'Yes' : 'NO - REQUIRED'}
+
+KNOWLEDGE CONTEXT:
+${getHeadSelectionContext()}
+
+${getZoneDesignContext()}
+
+${getHydraulicContext()}
+
+Evaluate this design and provide:
+1. Whether it passes professional standards (valid: true/false)
+2. List of specific issues found
+3. Recommendations for improvement
+
+Return JSON format: { valid: boolean, issues: string[], recommendations: string[] }`;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: { parts: [{ text: prompt }] },
+    config: {
+      responseMimeType: 'application/json',
+      systemInstruction: EXPERT_SYSTEM_INSTRUCTION,
+    },
+  });
+
+  const result = JSON.parse(response.text || '{}');
+  return {
+    valid: result.valid ?? false,
+    issues: result.issues ?? [],
+    recommendations: result.recommendations ?? [],
+  };
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+function ensureDefaults(parsed: SiteAnalysis): SiteAnalysis {
   if (!parsed.turfZones) parsed.turfZones = [];
   if (!parsed.bedZones) parsed.bedZones = [];
   if (!parsed.narrowStrips) parsed.narrowStrips = [];
@@ -239,53 +400,5 @@ Identify:
   if (!parsed.slopeIndicators) parsed.slopeIndicators = [];
   if (!parsed.treeCanopyAreas) parsed.treeCanopyAreas = [];
   if (!parsed.nearestBuildingLocation) parsed.nearestBuildingLocation = { x: 10, y: 10 };
-
   return parsed;
-}
-
-export async function getDesignRecommendations(
-  siteAnalysis: SiteAnalysis,
-  projectInput: Partial<ProjectInput>
-): Promise<DesignRecommendations> {
-  const availableHeads = SPRINKLER_HEADS.map(h => `${h.name}: ${h.manufacturer} ${h.model} (${h.minRadiusFt}-${h.maxRadiusFt}ft radius, ${h.gpmAtDefaultRadius} GPM)`).join('\n');
-
-  const prompt = `Based on this site analysis data, provide irrigation design recommendations.
-
-SITE ANALYSIS:
-${JSON.stringify(siteAnalysis, null, 2)}
-
-PROJECT DETAILS:
-- Application: ${projectInput.applicationType}
-- Water supply: ${projectInput.waterSupplySize}"
-- Static pressure: ${projectInput.staticPressurePSI} PSI
-- Turf type: ${projectInput.turfType}
-
-AVAILABLE SPRINKLER HEADS:
-${availableHeads}
-
-DESIGN RULES:
-- Max GPM per zone (1" lateral): 15 GPM
-- Max GPM per zone (1.25" lateral): 22 GPM
-- Max pipe velocity: 5 fps
-- Head-to-head spacing = manufacturer radius
-- Separate zones for: turf vs beds, full-sun vs shade, slopes > 4:1
-- Narrow strips < 8ft: use strip nozzles
-
-Recommend:
-1. Head type for each identified zone
-2. Suggested total zone count
-3. Valve cluster locations (central to served zones)
-4. Controller location
-5. Mainline route suggestions`;
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: { parts: [{ text: prompt }] },
-    config: {
-      responseMimeType: 'application/json',
-      systemInstruction: 'You are a senior irrigation designer providing design recommendations based on site analysis. Be practical and follow industry best practices for commercial irrigation in the Southeast US.',
-    },
-  });
-
-  return JSON.parse(response.text || '{}') as DesignRecommendations;
 }

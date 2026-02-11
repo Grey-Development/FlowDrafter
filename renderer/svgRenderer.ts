@@ -180,3 +180,169 @@ function renderGeneralNotes(x: number, y: number): string {
 function escapeXml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+
+// ============================================================================
+// IRRIGATION LAYER RENDERER (Step 2 of 3-step pipeline)
+// ============================================================================
+
+export interface IrrigationLayerConfig {
+  pixelsPerFoot: number;
+  originX: number;
+  originY: number;
+}
+
+/**
+ * Render ONLY irrigation elements as a standalone SVG layer
+ * This is Step 2 of the 3-step visual pipeline:
+ * 1. Site plan (base layer)
+ * 2. Irrigation layer (this function)
+ * 3. Composited final plan
+ *
+ * The output is a transparent SVG that can be overlaid on the site plan
+ */
+export function renderIrrigationLayer(
+  design: IrrigationDesign,
+  widthFt: number,
+  heightFt: number,
+  config: IrrigationLayerConfig
+): string {
+  const { pixelsPerFoot, originX, originY } = config;
+
+  // Calculate SVG dimensions
+  const svgWidth = widthFt * pixelsPerFoot;
+  const svgHeight = heightFt * pixelsPerFoot;
+
+  const layers: string[] = [];
+
+  // Coordinate transformation functions
+  const toX = (ft: number) => originX + feetToSvgUnits(ft, pixelsPerFoot);
+  const toY = (ft: number) => originY + feetToSvgUnits(ft, pixelsPerFoot);
+  const toLen = (ft: number) => feetToSvgUnits(ft, pixelsPerFoot);
+
+  // SVG header with transparent background
+  layers.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}">`);
+
+  // Layer 1: Pipes (mainline, lateral, drip-supply)
+  layers.push('<g class="pipes">');
+  for (const pipe of design.pipes) {
+    const color = pipe.type === 'mainline' ? MAINLINE_COLOR : pipe.type === 'drip-supply' ? '#92400E' : '#666';
+    const weight = pipe.type === 'mainline' ? 2.5 : 1;
+    const dash = pipe.type === 'drip-supply' ? ' stroke-dasharray="6 3"' : '';
+    layers.push(`<line class="${pipe.type}" x1="${toX(pipe.startX)}" y1="${toY(pipe.startY)}" x2="${toX(pipe.endX)}" y2="${toY(pipe.endY)}" stroke="${color}" stroke-width="${weight}"${dash}/>`);
+  }
+  layers.push('</g>');
+
+  // Layer 2: Coverage circles (semi-transparent)
+  layers.push('<g class="coverage-circles">');
+  for (const head of design.heads) {
+    if (head.radiusFt > 0) {
+      const zone = design.zones.find(z => z.id === head.zoneId);
+      const color = zone?.color || '#999';
+      layers.push(coverageCircle(toX(head.x), toY(head.y), toLen(head.radiusFt), color));
+    }
+  }
+  layers.push('</g>');
+
+  // Layer 3: Head symbols
+  layers.push('<g class="heads">');
+  for (const head of design.heads) {
+    const zone = design.zones.find(z => z.id === head.zoneId);
+    const color = zone?.color || '#000';
+    layers.push(headSymbol(toX(head.x), toY(head.y), head.type, head.arc, toLen(head.radiusFt), color));
+  }
+  layers.push('</g>');
+
+  // Layer 4: Valves
+  layers.push('<g class="valves">');
+  for (const valve of design.valves) {
+    if (valve.type === 'master') {
+      layers.push(masterValveSymbol(toX(valve.x), toY(valve.y)));
+    } else {
+      const zone = design.zones.find(z => z.id === valve.zoneId);
+      layers.push(zoneValveSymbol(toX(valve.x), toY(valve.y), zone?.color || '#333'));
+      layers.push(valveBoxSymbol(toX(valve.x), toY(valve.y) + 10));
+    }
+  }
+  layers.push('</g>');
+
+  // Layer 5: Equipment (POC, backflow, controller, rain sensor)
+  layers.push('<g class="equipment">');
+  layers.push(pocSymbol(toX(design.poc.x), toY(design.poc.y)));
+  layers.push(rpzSymbol(toX(design.backflow.x), toY(design.backflow.y)));
+  layers.push(controllerSymbol(toX(design.controller.x), toY(design.controller.y)));
+  layers.push(rainSensorSymbol(toX(design.rainSensor.x), toY(design.rainSensor.y)));
+  layers.push('</g>');
+
+  layers.push('</svg>');
+  return layers.join('\n');
+}
+
+/**
+ * Render irrigation layer using viewBox in feet (for overlay on site plan)
+ * This version uses feet coordinates directly, matching the site plan coordinate system
+ */
+export function renderIrrigationLayerFeet(
+  design: IrrigationDesign,
+  widthFt: number,
+  heightFt: number
+): string {
+  const layers: string[] = [];
+
+  // SVG header - viewBox in feet to match site plan
+  layers.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${widthFt} ${heightFt}">`);
+
+  // Layer 1: Pipes
+  layers.push('<g class="pipes">');
+  for (const pipe of design.pipes) {
+    const color = pipe.type === 'mainline' ? MAINLINE_COLOR : pipe.type === 'drip-supply' ? '#92400E' : '#666';
+    const weight = pipe.type === 'mainline' ? 0.5 : 0.2; // Thinner for feet scale
+    const dash = pipe.type === 'drip-supply' ? ' stroke-dasharray="1 0.5"' : '';
+    layers.push(`<line class="${pipe.type}" x1="${pipe.startX}" y1="${pipe.startY}" x2="${pipe.endX}" y2="${pipe.endY}" stroke="${color}" stroke-width="${weight}"${dash}/>`);
+  }
+  layers.push('</g>');
+
+  // Layer 2: Coverage circles
+  layers.push('<g class="coverage-circles">');
+  for (const head of design.heads) {
+    if (head.radiusFt > 0) {
+      const zone = design.zones.find(z => z.id === head.zoneId);
+      const color = zone?.color || '#999';
+      layers.push(`<circle cx="${head.x}" cy="${head.y}" r="${head.radiusFt}" fill="${color}" fill-opacity="0.15" stroke="${color}" stroke-width="0.1" stroke-dasharray="0.5 0.25"/>`);
+    }
+  }
+  layers.push('</g>');
+
+  // Layer 3: Head symbols (scaled for feet)
+  layers.push('<g class="heads">');
+  for (const head of design.heads) {
+    const zone = design.zones.find(z => z.id === head.zoneId);
+    const color = zone?.color || '#000';
+    // Simple circles for heads at feet scale
+    const radius = head.type === 'rotor' ? 1.2 : head.type === 'drip' ? 0.8 : 1;
+    layers.push(`<circle cx="${head.x}" cy="${head.y}" r="${radius}" fill="${color}" stroke="#000" stroke-width="0.1"/>`);
+  }
+  layers.push('</g>');
+
+  // Layer 4: Valves
+  layers.push('<g class="valves">');
+  for (const valve of design.valves) {
+    const size = valve.type === 'master' ? 2 : 1.5;
+    layers.push(`<rect x="${valve.x - size/2}" y="${valve.y - size/2}" width="${size}" height="${size}" fill="${valve.type === 'master' ? '#000' : '#333'}" stroke="#000" stroke-width="0.1"/>`);
+  }
+  layers.push('</g>');
+
+  // Layer 5: Equipment
+  layers.push('<g class="equipment">');
+  // POC
+  layers.push(`<circle cx="${design.poc.x}" cy="${design.poc.y}" r="1.5" fill="none" stroke="#000" stroke-width="0.2"/>`);
+  layers.push(`<line x1="${design.poc.x - 1}" y1="${design.poc.y}" x2="${design.poc.x + 1}" y2="${design.poc.y}" stroke="#000" stroke-width="0.2"/>`);
+  layers.push(`<line x1="${design.poc.x}" y1="${design.poc.y - 1}" x2="${design.poc.x}" y2="${design.poc.y + 1}" stroke="#000" stroke-width="0.2"/>`);
+  // RPZ
+  layers.push(`<rect x="${design.backflow.x - 2}" y="${design.backflow.y - 1}" width="4" height="2" fill="#fff" stroke="#000" stroke-width="0.2"/>`);
+  // Controller
+  layers.push(`<rect x="${design.controller.x - 1.5}" y="${design.controller.y - 2}" width="3" height="4" fill="#fff" stroke="#000" stroke-width="0.2"/>`);
+  layers.push('</g>');
+
+  layers.push('</svg>');
+  return layers.join('\n');
+}

@@ -5,15 +5,27 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
+
+    // API base URL - use Catalyst function in production, local proxy in dev
+    const apiBaseUrl = mode === 'production'
+      ? '/server/gemini_proxy'  // Catalyst serverless function path
+      : 'http://localhost:3001'; // Local dev proxy
+
     return {
       server: {
         port: 3000,
         host: '0.0.0.0',
       },
+      // Build output to 'client' folder for Zoho Catalyst
+      build: {
+        outDir: 'client',
+        emptyOutDir: true,
+      },
       plugins: [react(), tailwindcss()],
       define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+        'import.meta.env.VITE_API_BASE_URL': JSON.stringify(apiBaseUrl),
+        // Keep for local dev fallback only
+        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || ''),
       },
       resolve: {
         alias: {

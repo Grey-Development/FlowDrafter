@@ -6,13 +6,19 @@ import PlanPreview from './components/PlanPreview';
 import ExportControls from './components/ExportControls';
 import { analyzeSite } from './services/geminiService';
 import { generateIrrigationDesign } from './engine/designEngine';
-import { renderAllSheets } from './renderer/svgRenderer';
+import { renderAllSheets, renderIrrigationLayerFeet } from './renderer/svgRenderer';
+import { generateSitePlanFromAnalysis } from './services/sitePlanGenerator';
+import { composePlanSheets } from './services/planCompositor';
 import { AppState, WorkflowStatus, ProjectInput } from './types';
+
+type PreviewMode = 'combined' | 'sitePlan' | 'irrigation';
 
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>({
     projectInput: null,
     siteAnalysis: null,
+    sitePlanSvg: null,
+    irrigationSvg: null,
     design: null,
     planSheets: [],
     status: WorkflowStatus.IDLE,
@@ -20,6 +26,7 @@ const App: React.FC = () => {
     progress: '',
   });
   const [activeSheet, setActiveSheet] = useState(0);
+  const [previewMode, setPreviewMode] = useState<PreviewMode>('combined');
 
   const handleProjectSubmit = async (input: ProjectInput) => {
     setState(prev => ({
@@ -54,8 +61,38 @@ const App: React.FC = () => {
     }
   };
 
-  const handleGenerateDesign = async () => {
+  const handleGenerateSitePlan = async () => {
     if (!state.siteAnalysis || !state.projectInput) return;
+
+    setState(prev => ({
+      ...prev,
+      status: WorkflowStatus.GENERATING_SITE_PLAN,
+      progress: 'Generating architectural site plan...',
+    }));
+
+    try {
+      // Step 1: Generate clean 2D architectural site plan
+      const sitePlanSvg = generateSitePlanFromAnalysis(state.siteAnalysis);
+
+      setState(prev => ({
+        ...prev,
+        sitePlanSvg,
+        status: WorkflowStatus.SITE_PLAN_COMPLETE,
+        progress: '',
+      }));
+    } catch (err) {
+      console.error('Site plan generation failed:', err);
+      setState(prev => ({
+        ...prev,
+        status: WorkflowStatus.ERROR,
+        error: 'Site plan generation failed. ' + (err instanceof Error ? err.message : ''),
+        progress: '',
+      }));
+    }
+  };
+
+  const handleGenerateDesign = async () => {
+    if (!state.siteAnalysis || !state.projectInput || !state.sitePlanSvg) return;
 
     setState(prev => ({
       ...prev,
@@ -64,25 +101,39 @@ const App: React.FC = () => {
     }));
 
     try {
-      // Run the deterministic design engine
+      // Step 2: Run the deterministic design engine
       const design = generateIrrigationDesign(state.siteAnalysis, state.projectInput);
 
       setState(prev => ({
         ...prev,
-        progress: 'Rendering plan sheets...',
+        progress: 'Generating irrigation layer...',
       }));
 
-      // Render SVG sheets
-      const sheets = renderAllSheets(
+      // Generate standalone irrigation layer SVG for preview
+      const irrigationSvg = renderIrrigationLayerFeet(
         design,
-        state.siteAnalysis,
-        state.projectInput,
-        state.projectInput.droneImagePreviewUrl
+        state.siteAnalysis.propertyWidthFt,
+        state.siteAnalysis.propertyLengthFt
       );
 
       setState(prev => ({
         ...prev,
+        progress: 'Composing plan sheets...',
+      }));
+
+      // Step 3: Compose final plan sheets with both layers
+      const compositorOutput = composePlanSheets({
+        sitePlanSvg: state.sitePlanSvg,
+        projectInput: state.projectInput,
         design,
+        siteAnalysis: state.siteAnalysis,
+      });
+      const sheets = compositorOutput.sheets;
+
+      setState(prev => ({
+        ...prev,
+        design,
+        irrigationSvg,
         planSheets: sheets,
         status: WorkflowStatus.DESIGN_COMPLETE,
         progress: '',
@@ -102,6 +153,8 @@ const App: React.FC = () => {
     setState({
       projectInput: null,
       siteAnalysis: null,
+      sitePlanSvg: null,
+      irrigationSvg: null,
       design: null,
       planSheets: [],
       status: WorkflowStatus.IDLE,
@@ -109,6 +162,7 @@ const App: React.FC = () => {
       progress: '',
     });
     setActiveSheet(0);
+    setPreviewMode('combined');
   };
 
   return (
@@ -129,6 +183,7 @@ const App: React.FC = () => {
 
         {/* Progress Indicator */}
         {(state.status === WorkflowStatus.ANALYZING ||
+          state.status === WorkflowStatus.GENERATING_SITE_PLAN ||
           state.status === WorkflowStatus.DESIGNING ||
           state.status === WorkflowStatus.EXPORTING) && (
           <div className="max-w-lg mx-auto mb-8">
@@ -140,9 +195,15 @@ const App: React.FC = () => {
                 </svg>
               </div>
               <p className="text-gray-700 font-medium">{state.progress}</p>
-              <div className="flex justify-center gap-2">
-                {['Analyze', 'Design', 'Render', 'Export'].map((step, i) => {
-                  const stepStatuses = [WorkflowStatus.ANALYZING, WorkflowStatus.DESIGNING, WorkflowStatus.DESIGNING, WorkflowStatus.EXPORTING];
+              <div className="flex justify-center gap-2 flex-wrap">
+                {['Analyze', 'Site Plan', 'Design', 'Compose', 'Export'].map((step, i) => {
+                  const stepStatuses = [
+                    WorkflowStatus.ANALYZING,
+                    WorkflowStatus.GENERATING_SITE_PLAN,
+                    WorkflowStatus.DESIGNING,
+                    WorkflowStatus.DESIGNING,
+                    WorkflowStatus.EXPORTING
+                  ];
                   const isActive = state.status === stepStatuses[i];
                   const isPast = stepStatuses.indexOf(state.status) > i;
                   return (
@@ -169,11 +230,43 @@ const App: React.FC = () => {
         {state.status === WorkflowStatus.ANALYSIS_COMPLETE && state.siteAnalysis && (
           <SiteAnalysisView
             analysis={state.siteAnalysis}
-            onContinue={handleGenerateDesign}
+            onContinue={handleGenerateSitePlan}
           />
         )}
 
-        {/* Step 3: Design Complete - Plan Preview + Export */}
+        {/* Step 3: Site Plan Preview */}
+        {state.status === WorkflowStatus.SITE_PLAN_COMPLETE && state.sitePlanSvg && (
+          <div className="max-w-4xl mx-auto space-y-6">
+            <div className="text-center">
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">Architectural Site Plan</h2>
+              <p className="text-gray-500">Clean 2D site plan generated from drone image analysis</p>
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+              <div
+                className="w-full aspect-[3/2] border border-gray-100 rounded-lg overflow-hidden bg-white"
+                dangerouslySetInnerHTML={{ __html: state.sitePlanSvg }}
+              />
+            </div>
+
+            <div className="flex justify-center gap-4">
+              <button
+                onClick={handleReset}
+                className="px-6 py-3 border border-gray-300 rounded-xl text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+              >
+                Start Over
+              </button>
+              <button
+                onClick={handleGenerateDesign}
+                className="px-8 py-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-bold shadow-lg shadow-emerald-500/20 transition-all"
+              >
+                Generate Irrigation Design →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 4: Design Complete - Plan Preview + Export */}
         {state.status === WorkflowStatus.DESIGN_COMPLETE && state.design && state.planSheets.length > 0 && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -191,25 +284,71 @@ const App: React.FC = () => {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-              <div className="lg:col-span-3">
-                <PlanPreview
-                  sheets={state.planSheets}
-                  activeSheet={activeSheet}
-                  onSheetChange={setActiveSheet}
-                />
-              </div>
-              <div>
-                <ExportControls
-                  sheets={state.planSheets}
-                  design={state.design}
-                  projectName={state.projectInput?.projectName || 'Project'}
-                  exporting={state.status === WorkflowStatus.EXPORTING}
-                  onExportStart={() => setState(prev => ({ ...prev, status: WorkflowStatus.EXPORTING }))}
-                  onExportEnd={() => setState(prev => ({ ...prev, status: WorkflowStatus.DESIGN_COMPLETE }))}
-                />
+            {/* Layer Preview Toggle */}
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <div className="flex items-center gap-4">
+                <span className="text-sm font-medium text-gray-700">View Layer:</span>
+                <div className="flex gap-2">
+                  {[
+                    { value: 'combined', label: 'Combined' },
+                    { value: 'sitePlan', label: 'Site Plan' },
+                    { value: 'irrigation', label: 'Irrigation' },
+                  ].map((mode) => (
+                    <button
+                      key={mode.value}
+                      onClick={() => setPreviewMode(mode.value as PreviewMode)}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        previewMode === mode.value
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
+
+            {/* Layer Previews */}
+            {previewMode !== 'combined' && (
+              <div className="bg-white rounded-xl border border-gray-200 p-4">
+                <h3 className="font-bold text-gray-900 mb-4">
+                  {previewMode === 'sitePlan' ? 'Site Plan Layer' : 'Irrigation Layer'}
+                </h3>
+                <div
+                  className="w-full aspect-[3/2] border border-gray-100 rounded-lg overflow-hidden bg-white"
+                  dangerouslySetInnerHTML={{
+                    __html: previewMode === 'sitePlan'
+                      ? (state.sitePlanSvg || '')
+                      : (state.irrigationSvg || '')
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Combined Plan Preview */}
+            {previewMode === 'combined' && (
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                <div className="lg:col-span-3">
+                  <PlanPreview
+                    sheets={state.planSheets}
+                    activeSheet={activeSheet}
+                    onSheetChange={setActiveSheet}
+                  />
+                </div>
+                <div>
+                  <ExportControls
+                    sheets={state.planSheets}
+                    design={state.design}
+                    projectName={state.projectInput?.projectName || 'Project'}
+                    exporting={state.status === WorkflowStatus.EXPORTING}
+                    onExportStart={() => setState(prev => ({ ...prev, status: WorkflowStatus.EXPORTING }))}
+                    onExportEnd={() => setState(prev => ({ ...prev, status: WorkflowStatus.DESIGN_COMPLETE }))}
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Material Schedule */}
             {state.design.materialSchedule.length > 0 && (

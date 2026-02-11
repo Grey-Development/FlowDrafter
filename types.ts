@@ -3,6 +3,8 @@ export enum WorkflowStatus {
   UPLOADING = 'UPLOADING',
   ANALYZING = 'ANALYZING',
   ANALYSIS_COMPLETE = 'ANALYSIS_COMPLETE',
+  GENERATING_SITE_PLAN = 'GENERATING_SITE_PLAN',
+  SITE_PLAN_COMPLETE = 'SITE_PLAN_COMPLETE',
   DESIGNING = 'DESIGNING',
   DESIGN_COMPLETE = 'DESIGN_COMPLETE',
   EXPORTING = 'EXPORTING',
@@ -158,12 +160,14 @@ export interface PlanSheet {
   sheetNumber: string;
   title: string;
   svgContent: string;
-  pageType: 'plan' | 'details';
+  pageType: 'plan' | 'details' | 'schedule';
 }
 
 export interface AppState {
   projectInput: ProjectInput | null;
   siteAnalysis: SiteAnalysis | null;
+  sitePlanSvg: string | null;
+  irrigationSvg: string | null;
   design: IrrigationDesign | null;
   planSheets: PlanSheet[];
   status: WorkflowStatus;
