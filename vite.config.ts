@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
 
     // API base URL - use Catalyst function in production, local proxy in dev
     const apiBaseUrl = mode === 'production'
-      ? '/server/FlowDraft'  // Catalyst serverless function path
+      ? '/api'  // Vercel serverless API path
       : 'http://localhost:3001'; // Local dev proxy
 
     return {
