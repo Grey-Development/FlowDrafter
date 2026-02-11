@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
 
     // API base URL - use Catalyst function in production, local proxy in dev
     const apiBaseUrl = mode === 'production'
-      ? '/server/gemini_proxy'  // Catalyst serverless function path
+      ? '/server/FlowDraft'  // Catalyst serverless function path
       : 'http://localhost:3001'; // Local dev proxy
 
     return {
