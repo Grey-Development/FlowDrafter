@@ -6,6 +6,38 @@ interface Props {
   disabled: boolean;
 }
 
+// Compress image using canvas - keeps quality good for AI analysis while reducing size
+async function compressImage(file: File, maxWidth = 2000, quality = 0.8): Promise<{ dataUrl: string; mimeType: string }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      // Calculate new dimensions maintaining aspect ratio
+      let { width, height } = img;
+      if (width > maxWidth) {
+        height = (height * maxWidth) / width;
+        width = maxWidth;
+      }
+
+      // Draw to canvas
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Could not get canvas context'));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Export as JPEG (better compression than PNG)
+      const dataUrl = canvas.toDataURL('image/jpeg', quality);
+      resolve({ dataUrl, mimeType: 'image/jpeg' });
+    };
+    img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 const ProjectForm: React.FC<Props> = ({ onSubmit, disabled }) => {
   const [projectName, setProjectName] = useState('');
   const [waterSupplySize, setWaterSupplySize] = useState<0.75 | 1 | 1.5 | 2>(1);
@@ -15,24 +47,48 @@ const ProjectForm: React.FC<Props> = ({ onSubmit, disabled }) => {
   const [applicationType, setApplicationType] = useState<'commercial' | 'multifamily' | 'athletic-field' | 'hoa-common-area'>('commercial');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
+  const [compressedMimeType, setCompressedMimeType] = useState<string>('image/jpeg');
+  const [isCompressing, setIsCompressing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 20 * 1024 * 1024) {
       alert('File is too large. Maximum size is 20MB.');
       return;
     }
+
     setImageFile(file);
-    const reader = new FileReader();
-    reader.onloadend = () => setImagePreview(reader.result as string);
-    reader.readAsDataURL(file);
+    setIsCompressing(true);
+
+    try {
+      // Compress image to reduce size for API upload
+      const { dataUrl, mimeType } = await compressImage(file, 2000, 0.85);
+      setImagePreview(dataUrl);
+      setCompressedMimeType(mimeType);
+
+      // Log compression results
+      const originalSize = (file.size / 1024 / 1024).toFixed(2);
+      const compressedSize = (dataUrl.length * 0.75 / 1024 / 1024).toFixed(2); // base64 is ~33% larger
+      console.log(`Image compressed: ${originalSize}MB → ~${compressedSize}MB`);
+    } catch (err) {
+      console.error('Compression failed, using original:', err);
+      // Fallback to original if compression fails
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result as string);
+        setCompressedMimeType(file.type);
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setIsCompressing(false);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!imageFile || !imagePreview || !projectName.trim()) return;
+    if (!imageFile || !imagePreview || !projectName.trim() || isCompressing) return;
 
     const base64 = imagePreview.split(',')[1];
     onSubmit({
@@ -43,7 +99,7 @@ const ProjectForm: React.FC<Props> = ({ onSubmit, disabled }) => {
       turfType,
       applicationType,
       droneImageBase64: base64,
-      droneImageMimeType: imageFile.type,
+      droneImageMimeType: compressedMimeType,
       droneImagePreviewUrl: imagePreview,
     });
   };
@@ -183,10 +239,10 @@ const ProjectForm: React.FC<Props> = ({ onSubmit, disabled }) => {
 
         <button
           type="submit"
-          disabled={disabled || !imageFile || !projectName.trim()}
+          disabled={disabled || !imageFile || !projectName.trim() || isCompressing}
           className="w-full py-3 bg-emerald-700 hover:bg-emerald-800 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-xl font-bold text-lg shadow-lg shadow-emerald-500/20 transition-all transform hover:scale-[1.01]"
         >
-          Analyze Site and Generate Plan
+          {isCompressing ? 'Optimizing Image...' : 'Analyze Site and Generate Plan'}
         </button>
       </div>
     </form>
