@@ -166,13 +166,25 @@ const ImageMarkupComponent: React.FC<Props> = ({ imageUrl, markup, onMarkupChang
         ))}
         {currentPolygon.length > 0 && (
           <>
-            <polygon
-              points={currentPolygon.map(p => `${p.x * 100}%,${p.y * 100}%`).join(' ')}
-              fill="rgba(34, 197, 94, 0.15)"
-              stroke="#22C55E"
-              strokeWidth="3"
-              strokeDasharray="8 4"
-            />
+            {/* Use polyline during drawing to show connecting lines */}
+            {currentPolygon.length >= 2 && (
+              <polyline
+                points={currentPolygon.map(p => `${p.x * 100}%,${p.y * 100}%`).join(' ')}
+                fill="none"
+                stroke="#22C55E"
+                strokeWidth="3"
+                strokeDasharray="8 4"
+              />
+            )}
+            {/* Show filled polygon preview only when we have 3+ points */}
+            {currentPolygon.length >= 3 && (
+              <polygon
+                points={currentPolygon.map(p => `${p.x * 100}%,${p.y * 100}%`).join(' ')}
+                fill="rgba(34, 197, 94, 0.15)"
+                stroke="none"
+              />
+            )}
+            {/* Vertex markers */}
             {currentPolygon.map((p, i) => (
               <circle
                 key={i}
